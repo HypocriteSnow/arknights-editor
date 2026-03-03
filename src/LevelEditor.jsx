@@ -67,7 +67,7 @@ const DEFAULT_OPERATORS = [
 ];
 
 const INITIAL_LEVEL = {
-  version: "1.8", levelId: "level_01", name: "虫洞攻防 LV1.8",
+  version: "1.8", levelId: "level_01", name: "未命名关卡",
   gridWidth: 10, gridHeight: 6, baseHealth: 3, initialDp: 20, 
   dpRecoveryInterval: 1.0, dpRecoveryAmount: 1, 
   portals: { "3,1": { outX: 5, outY: 1, delay: 1.0, color: '#a855f7' } }, 
@@ -345,8 +345,8 @@ const PlayMode = ({ level, onExit }) => {
           </div>
         )}
 
-        <div className="w-full h-full overflow-auto custom-scrollbar bg-neutral-950">
-          <div className="w-max h-max min-w-full min-h-full p-16 md:p-32 grid place-items-center">
+        <div className="w-full h-full overflow-auto custom-scrollbar bg-neutral-950 flex items-center justify-center">
+          <div className="w-max h-max min-w-full min-h-full pt-16 px-16 pb-32 md:pt-32 md:px-32 md:pb-48 grid place-items-center">
             <div style={{ transform: `scale(${zoom})`, transformOrigin: 'center', transition: 'transform 0.1s ease-out' }}>
                 <div className="relative bg-neutral-700 shadow-2xl select-none" style={{ width: `${gridW * CELL_SIZE}px`, height: `${gridH * CELL_SIZE}px` }}>
                   
@@ -380,7 +380,6 @@ const PlayMode = ({ level, onExit }) => {
                       </div>
                     ))}
                     {st.enemies.map(e => (
-                      // 核心修复：彻底移除 left/top 的 transition 动画干涉，只保留透明度和缩放的渐变！
                       <div key={e.id} className={`absolute flex items-center justify-center transition-[opacity,transform] duration-300 ${e.isTeleporting ? 'opacity-0 scale-50' : 'opacity-100 scale-100'}`} style={{ left: `${e.x * CELL_SIZE}px`, top: `${e.y * CELL_SIZE}px`, width: `${CELL_SIZE}px`, height: `${CELL_SIZE}px` }}>
                         <div className={`relative flex flex-col items-center ${e.movementType === 'FLYING' ? 'drop-shadow-2xl -translate-y-2' : ''}`}>
                           <span className="absolute -top-7 text-[10px] font-bold text-white whitespace-nowrap bg-black/60 px-1.5 py-0.5 rounded shadow-sm z-20">{e.name.split(' ')[0]}</span>
@@ -417,7 +416,7 @@ const PlayMode = ({ level, onExit }) => {
 // ==========================================
 // 4. 编辑器主体
 // ==========================================
-export default function LevelEditor() {
+export default function App() {
   const [level, setLevel] = useState(INITIAL_LEVEL);
   const [selectedTool, setSelectedTool] = useState(TILE_TYPES.GROUND);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -432,6 +431,7 @@ export default function LevelEditor() {
   const [selectedLevelToPlay, setSelectedLevelToPlay] = useState(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveNameInput, setSaveNameInput] = useState("");
+  const [isSaveAsNew, setIsSaveAsNew] = useState(false); // 新增另存为状态
   const [toastMsg, setToastMsg] = useState("");
   const [expandedStats, setExpandedStats] = useState({});
   const [editorZoom, setEditorZoom] = useState(1);
@@ -476,15 +476,21 @@ export default function LevelEditor() {
 
   const handleConfirmSave = () => {
     if (!saveNameInput.trim()) return;
-    const updatedLevel = { ...level, name: saveNameInput, levelId: level.levelId === 'level_01' ? `lvl_${Date.now()}` : level.levelId };
+    // 判断是否需要生成新的 levelId
+    const newId = (level.levelId === 'level_01' || isSaveAsNew) ? `lvl_${Date.now()}` : level.levelId;
+    const updatedLevel = { ...level, name: saveNameInput, levelId: newId };
+    
     setLevel(updatedLevel);
     const existingLevels = [...savedLevels];
     const existingIndex = existingLevels.findIndex(l => l.levelId === updatedLevel.levelId);
+    
     if (existingIndex >= 0) existingLevels[existingIndex] = updatedLevel; else existingLevels.push(updatedLevel);
+    
     setSavedLevels(existingLevels);
     setSelectedLevelToPlay(updatedLevel);
     try { localStorage.setItem('arknights_custom_levels', JSON.stringify(existingLevels)); setToastMsg("保存成功！"); } catch(e) {}
     setShowSaveModal(false);
+    setIsSaveAsNew(false);
   };
 
   // 核心功能回归：导出 JSON 到本地
@@ -496,10 +502,10 @@ export default function LevelEditor() {
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
-    setToastMsg("文件已成功导出");
+    setTimeout(() => setToastMsg("文件已成功导出"), 100);
   };
 
-  // 核心功能回归：从本地导入 JSON
+  // 导入并直接修改编辑器 (原功能)
   const importFromFile = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -521,6 +527,55 @@ export default function LevelEditor() {
     };
     reader.readAsText(file);
     e.target.value = null; // 重置 input 允许重复导入同一文件
+  };
+
+  // 新增功能：在大厅中直接导入文件并直接开玩
+  const importAndPlay = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target.result);
+        if(parsed && parsed.mapData) {
+           setSelectedLevelToPlay(parsed);
+           setViewMode('PLAYING');
+           setToastMsg("读取成功，开始试玩！");
+        } else {
+           setToastMsg("JSON 格式不正确！");
+        }
+      } catch (err) {
+        setToastMsg("JSON 解析失败！");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = null;
+  };
+
+  // 新增功能：删除特定的关卡
+  const deleteSavedLevel = (e, id) => {
+    e.stopPropagation();
+    const newLevels = savedLevels.filter(l => l.levelId !== id);
+    setSavedLevels(newLevels);
+    localStorage.setItem('arknights_custom_levels', JSON.stringify(newLevels));
+    if (selectedLevelToPlay?.levelId === id) setSelectedLevelToPlay(null);
+    setToastMsg("已删除关卡");
+  };
+
+  // 新增功能：清空所有保存的关卡
+  const clearAllSavedLevels = () => {
+    setSavedLevels([]);
+    localStorage.removeItem('arknights_custom_levels');
+    setSelectedLevelToPlay(null);
+    setToastMsg("已清空所有本地存储的关卡");
+  };
+
+  // 新增功能：新建关卡模板
+  const createNewLevel = () => {
+    setLevel({ ...INITIAL_LEVEL, levelId: `lvl_${Date.now()}`, name: "新关卡" });
+    setToastMsg("已创建空白关卡，记得保存哦");
+    setViewMode('EDITOR');
+    setActiveTab('MAP');
   };
 
   useEffect(() => { if (toastMsg) { const timer = setTimeout(() => setToastMsg(""), 3000); return () => clearTimeout(timer); } }, [toastMsg]);
@@ -594,8 +649,8 @@ export default function LevelEditor() {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-900 text-neutral-200 p-6 flex flex-col font-sans select-none" onMouseUp={() => setIsDrawing(false)} onMouseLeave={() => setIsDrawing(false)} onContextMenu={(e) => e.preventDefault()}>
-      <div className="max-w-7xl mx-auto w-full space-y-6 flex-1 flex flex-col h-[calc(100vh-48px)]">
+    <div className="h-screen w-full bg-neutral-900 text-neutral-200 p-4 md:p-6 flex flex-col font-sans select-none overflow-hidden" onMouseUp={() => setIsDrawing(false)} onMouseLeave={() => setIsDrawing(false)} onContextMenu={(e) => e.preventDefault()}>
+      <div className="max-w-7xl mx-auto w-full space-y-4 md:space-y-6 flex-1 flex flex-col min-h-0">
         
         <header className="flex items-center justify-between border-b border-neutral-700 pb-4 flex-shrink-0">
           <div>
@@ -605,8 +660,11 @@ export default function LevelEditor() {
           <div className="flex gap-3 items-center">
             {/* 全局导入导出按钮区 */}
             <div className="hidden md:flex items-center gap-2 mr-2 border-r border-neutral-700 pr-4">
+              <button onClick={createNewLevel} className="text-xs font-bold text-neutral-400 hover:text-white px-2 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 transition-colors flex items-center gap-1">
+                <Plus size={14}/> 新建关卡
+              </button>
               <button onClick={exportToFile} className="text-xs font-bold text-neutral-400 hover:text-white px-2 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 transition-colors flex items-center gap-1">
-                <Download size={14}/> 导出本地
+                <Download size={14}/> 导出当前
               </button>
               <label className="text-xs font-bold text-neutral-400 hover:text-white px-2 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 transition-colors cursor-pointer flex items-center gap-1">
                 <Upload size={14}/> 导入本地
@@ -614,7 +672,7 @@ export default function LevelEditor() {
               </label>
             </div>
             
-            <button onClick={() => { setViewMode('JSON'); setEditingWaveIndex(null); }} className={`px-4 py-2 rounded-md text-sm font-bold border ${viewMode === 'JSON' ? 'bg-neutral-700 text-white border-neutral-500' : 'bg-neutral-800 text-neutral-400 border-neutral-700 hover:bg-neutral-700'}`}>&lt;/&gt; JSON 代码</button>
+            <button onClick={() => { setViewMode('JSON'); setEditingWaveIndex(null); }} className={`px-4 py-2 rounded-md text-sm font-bold border ${viewMode === 'JSON' ? 'bg-neutral-700 text-white border-neutral-500' : 'bg-neutral-800 text-neutral-400 border-neutral-700 hover:bg-neutral-700'}`}>&lt;/&gt; JSON</button>
             <button onClick={() => { setViewMode('EDITOR'); setEditingWaveIndex(null); }} className={`px-4 py-2 rounded-md text-sm font-bold border ${viewMode === 'EDITOR' ? 'bg-neutral-700 text-white border-neutral-500' : 'bg-neutral-800 text-neutral-400 border-neutral-700 hover:bg-neutral-700'}`}><Map size={16} className="inline mr-1" /> 编辑器</button>
             <button onClick={() => { setViewMode('PLAY_MENU'); setEditingWaveIndex(null); }} className={`px-5 py-2 rounded-md text-sm font-bold shadow-md flex items-center gap-2 ${viewMode === 'PLAY_MENU' ? 'bg-green-600 border-green-500 text-white' : 'bg-green-900/40 border-green-800/50 text-green-400 hover:bg-green-800/60'}`}><Gamepad2 size={18} /> 试玩大厅</button>
           </div>
@@ -632,15 +690,51 @@ export default function LevelEditor() {
           <div className="bg-neutral-950 rounded-xl border border-neutral-800 p-10 min-h-[600px] flex flex-col items-center animate-in zoom-in-95 shadow-inner">
              <div className="w-full max-w-2xl">
                 <div className="text-center mb-8"><Gamepad2 size={48} className="mx-auto text-green-500 mb-4 opacity-80" /><h2 className="text-3xl font-black text-white">选择关卡试玩</h2></div>
+                
+                {/* 试玩大厅的操作头 */}
+                <div className="flex justify-between items-center mb-4">
+                   <h3 className="text-lg font-bold text-neutral-300">本地存储库</h3>
+                   <div className="flex gap-2">
+                       <label className="px-4 py-2 bg-blue-600/20 border border-blue-500/50 hover:bg-blue-600 text-blue-400 hover:text-white text-sm font-bold rounded cursor-pointer transition-colors shadow-sm flex items-center gap-2">
+                           <Upload size={16} /> 直接导入 JSON 试玩
+                           <input type="file" accept=".json" className="hidden" onChange={importAndPlay} />
+                       </label>
+                       {savedLevels.length > 0 && (
+                           <button onClick={clearAllSavedLevels} className="px-4 py-2 bg-neutral-800 border border-red-900/50 hover:bg-red-900 hover:text-white text-red-400 text-sm font-bold rounded transition-colors flex items-center gap-2">
+                               <Trash2 size={16} /> 清空全部
+                           </button>
+                       )}
+                   </div>
+                </div>
+
                 <div className="bg-neutral-900 border border-neutral-700 rounded-xl p-6 shadow-xl">
                   {savedLevels.length === 0 ? (
-                    <div className="text-center py-10 text-neutral-600 bg-neutral-950 border border-dashed border-neutral-800"><p>暂无保存的关卡</p></div>
+                    <div className="text-center py-12 text-neutral-500 bg-neutral-950 border border-dashed border-neutral-800 rounded-lg"><p>暂无保存的关卡</p><p className="text-xs mt-2 opacity-60">你可以去编辑器创作，或者直接通过上面的按钮导入外部文件</p></div>
                   ) : (
                     <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
                       {savedLevels.map((lvl) => (
-                        <div key={lvl.levelId} onClick={() => setSelectedLevelToPlay(lvl)} className={`flex items-center justify-between p-4 rounded-lg border cursor-pointer ${selectedLevelToPlay?.levelId === lvl.levelId ? 'bg-blue-900/30 border-blue-500 shadow-md' : 'bg-neutral-950 border-neutral-800 hover:border-neutral-600'}`}>
-                          <div><div className="font-bold text-white text-lg">{lvl.name}</div><div className="text-xs text-neutral-500 flex gap-3 mt-1"><span>{lvl.gridWidth}x{lvl.gridHeight}</span></div></div>
-                          {selectedLevelToPlay?.levelId === lvl.levelId && <Check className="text-blue-500" size={24} />}
+                        <div key={lvl.levelId} onClick={() => setSelectedLevelToPlay(lvl)} className={`flex items-center justify-between p-4 rounded-lg border cursor-pointer transition-all ${selectedLevelToPlay?.levelId === lvl.levelId ? 'bg-blue-900/30 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.2)]' : 'bg-neutral-950 border-neutral-800 hover:border-neutral-600'}`}>
+                          <div>
+                              <div className="font-bold text-white text-lg">{lvl.name}</div>
+                              <div className="text-xs text-neutral-500 flex gap-3 mt-1"><span>{lvl.gridWidth}x{lvl.gridHeight}</span><span>ID: {lvl.levelId.substring(0,10)}...</span></div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                              {selectedLevelToPlay?.levelId === lvl.levelId && <Check className="text-blue-500 mr-2" size={24} />}
+                              
+                              <button onClick={(e) => {
+                                  e.stopPropagation();
+                                  setLevel(lvl);
+                                  setJsonInput(JSON.stringify(lvl, null, 2));
+                                  setViewMode('EDITOR');
+                                  setToastMsg("已加载到编辑器");
+                              }} className="p-2 text-neutral-500 hover:text-yellow-400 hover:bg-neutral-800 rounded transition-colors" title="加载到编辑器修改">
+                                  <Settings2 size={18} />
+                              </button>
+
+                              <button onClick={(e) => deleteSavedLevel(e, lvl.levelId)} className="p-2 text-neutral-500 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors" title="永久删除该存档">
+                                  <Trash2 size={18} />
+                              </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -657,8 +751,8 @@ export default function LevelEditor() {
           </div>
         ) : (
           /* EDITOR 模式 */
-          <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0 overflow-hidden">
-            <div className="lg:w-80 bg-neutral-800 rounded-xl border border-neutral-700 shadow-xl overflow-hidden flex flex-col flex-shrink-0 z-20">
+          <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 flex-1 min-h-0 overflow-hidden">
+            <div className="lg:w-80 h-[45vh] lg:h-full bg-neutral-800 rounded-xl border border-neutral-700 shadow-xl overflow-hidden flex flex-col flex-shrink-0 z-20">
               
               <div className="flex border-b border-neutral-700 bg-neutral-900">
                 <button className={`flex-1 py-3 text-xs font-semibold flex items-center justify-center gap-1 ${activeTab === 'MAP' ? 'text-blue-400 border-b-2 border-blue-400 bg-neutral-800' : 'text-neutral-500 hover:text-neutral-300'}`} onClick={() => { setActiveTab('MAP'); setEditingWaveIndex(null); }}><Map size={14}/> 地形</button>
@@ -926,7 +1020,7 @@ export default function LevelEditor() {
 
             {/* 右侧画布区 */}
             <div 
-              className={`flex-1 relative rounded-xl border flex flex-col overflow-hidden ${editingWaveIndex !== null ? 'border-yellow-500 shadow-[inset_0_0_50px_rgba(234,179,8,0.1)]' : 'border-neutral-800'}`}
+              className={`flex-1 min-h-0 relative rounded-xl border flex flex-col overflow-hidden ${editingWaveIndex !== null ? 'border-yellow-500 shadow-[inset_0_0_50px_rgba(234,179,8,0.1)]' : 'border-neutral-800'}`}
               onWheel={handleEditorWheel}
             >
               {pathError && <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-red-900 text-white px-3 py-1 rounded text-xs z-50 shadow-lg">{pathError}</div>}
@@ -956,7 +1050,7 @@ export default function LevelEditor() {
               </div>
 
               {editingWaveIndex === null && (
-                <div className="absolute bottom-6 right-6 z-40">
+                <div className="absolute bottom-4 right-4 z-40">
                   <button onClick={() => { setSaveNameInput(level.name); setShowSaveModal(true); }} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-lg font-bold shadow-[0_0_20px_rgba(37,99,235,0.4)] border border-blue-400 transition-transform active:scale-95">
                     <Download size={18} /> 保存并同步至大厅
                   </button>
@@ -964,58 +1058,59 @@ export default function LevelEditor() {
               )}
 
               <div className="w-full h-full bg-neutral-950 overflow-auto custom-scrollbar">
-                <div className="pt-24 pb-32 px-24 md:px-32 flex min-w-max min-h-max" style={{ transform: `scale(${editorZoom})`, transformOrigin: 'top left', transition: isCtrlMode ? 'none' : 'transform 0.1s ease-out' }}>
-                  <div className="relative bg-neutral-700 shadow-2xl border border-neutral-600" style={{ width: level.gridWidth * CELL_SIZE, height: level.gridHeight * CELL_SIZE }}>
-                    
-                    <div className="grid absolute inset-0" style={{ gridTemplateColumns: `repeat(${level.gridWidth}, ${CELL_SIZE}px)`, gridTemplateRows: `repeat(${level.gridHeight}, ${CELL_SIZE}px)` }}>
-                      {(level.mapData || []).map((row, y) => (
-                        row.map((cellType, x) => {
-                          const isEditMode = editingWaveIndex !== null;
-                          const currentPath = isEditMode ? ((level.waves || [])[editingWaveIndex]?.path || []) : [];
-                          const pathNodeIndex = currentPath.findIndex(p => p.x === x && p.y === y);
-                          const isPath = pathNodeIndex !== -1;
-                          const sData = spawns.find(s => s.x === x && s.y === y);
-                          const bData = bases.find(b => b.x === x && b.y === y);
-                          
-                          const customColor = getPortalColor(level, x, y, cellType);
-                          const portalStyle = customColor ? { borderColor: customColor, boxShadow: `inset 0 0 15px ${customColor}80` } : {};
+                <div className="w-max h-max min-w-full min-h-full pt-16 px-16 pb-36 md:pt-24 md:px-24 md:pb-48 grid place-items-center">
+                  <div style={{ transform: `scale(${editorZoom})`, transformOrigin: 'center', transition: isCtrlMode ? 'none' : 'transform 0.1s ease-out' }}>
+                    <div className="relative bg-neutral-700 shadow-2xl flex-shrink-0" style={{ width: level.gridWidth * CELL_SIZE, height: level.gridHeight * CELL_SIZE }}>
+                      <div className="grid absolute inset-0" style={{ gridTemplateColumns: `repeat(${level.gridWidth}, ${CELL_SIZE}px)`, gridTemplateRows: `repeat(${level.gridHeight}, ${CELL_SIZE}px)` }}>
+                        {(level.mapData || []).map((row, y) => (
+                          row.map((cellType, x) => {
+                            const isEditMode = editingWaveIndex !== null;
+                            const currentPath = isEditMode ? ((level.waves || [])[editingWaveIndex]?.path || []) : [];
+                            const pathNodeIndex = currentPath.findIndex(p => p.x === x && p.y === y);
+                            const isPath = pathNodeIndex !== -1;
+                            const sData = spawns.find(s => s.x === x && s.y === y);
+                            const bData = bases.find(b => b.x === x && b.y === y);
+                            
+                            const customColor = getPortalColor(level, x, y, cellType);
+                            const portalStyle = customColor ? { borderColor: customColor, boxShadow: `inset 0 0 15px ${customColor}80` } : {};
 
-                          return (
-                            <div
-                              key={`${x}-${y}`}
-                              className={`relative cursor-crosshair transition-all duration-75 border border-black/10 hover:brightness-125 hover:border-white/30
-                                ${TILE_STYLES[cellType]} 
-                                ${isEditMode && !isPath ? 'opacity-60' : 'opacity-100'} 
-                                ${isPath ? '!bg-yellow-500/40 !border-yellow-400 z-10' : ''}`
-                              }
-                              style={customColor ? portalStyle : undefined}
-                              onMouseDown={(e) => {
-                                if (isEditMode) {
-                                  if (e.button === 2) {
-                                    const w=[...level.waves]; const p=w[editingWaveIndex].path; const idx=p.findIndex(n=>n.x===x&&n.y===y);
-                                    if(idx!==-1) w[editingWaveIndex].path=p.slice(0,idx); else if(p.length) p.pop();
-                                    setLevel({...level,waves:w});
-                                  } else {
-                                    const w=[...level.waves]; const p=w[editingWaveIndex].path; const last=p[p.length-1];
-                                    if(!last || last.x!==x || last.y!==y) { p.push({x,y,wait:0}); setLevel({...level,waves:w}); }
-                                  }
-                                } else if (e.button === 0) { setIsDrawing(true); applyMapChange(x, y, selectedTool); }
-                              }}
-                              onMouseEnter={() => { if (isDrawing && !isEditMode) { applyMapChange(x, y, selectedTool); } }}
-                            >
-                              {sData && <span className="absolute inset-0 flex items-center justify-center font-bold text-white drop-shadow-md text-sm pointer-events-none">{sData.id}</span>}
-                              {bData && <span className="absolute inset-0 flex items-center justify-center font-bold text-white drop-shadow-md text-sm pointer-events-none">{bData.id}</span>}
-                              {isPath && <span className="absolute inset-0 flex items-center justify-center font-black text-yellow-100 text-lg pointer-events-none">{pathNodeIndex + 1}</span>}
-                              
-                              {(cellType === TILE_TYPES.PORTAL_IN || cellType === TILE_TYPES.PORTAL_OUT) && (
-                                <span className="absolute flex items-center justify-center top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow-md pointer-events-none" style={{backgroundColor: customColor || '#a855f7'}}>
-                                  {level.portalIdMap?.[`${x},${y}`]}
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })
-                      ))}
+                            return (
+                              <div
+                                key={`${x}-${y}`}
+                                className={`relative cursor-crosshair transition-all duration-75 border border-black/10 hover:brightness-125 hover:border-white/30
+                                  ${TILE_STYLES[cellType]} 
+                                  ${isEditMode && !isPath ? 'opacity-60' : 'opacity-100'} 
+                                  ${isPath ? '!bg-yellow-500/40 !border-yellow-400 z-10' : ''}`
+                                }
+                                style={customColor ? portalStyle : undefined}
+                                onMouseDown={(e) => {
+                                  if (isEditMode) {
+                                    if (e.button === 2) {
+                                      const w=[...level.waves]; const p=w[editingWaveIndex].path; const idx=p.findIndex(n=>n.x===x&&n.y===y);
+                                      if(idx!==-1) w[editingWaveIndex].path=p.slice(0,idx); else if(p.length) p.pop();
+                                      setLevel({...level,waves:w});
+                                    } else {
+                                      const w=[...level.waves]; const p=w[editingWaveIndex].path; const last=p[p.length-1];
+                                      if(!last || last.x!==x || last.y!==y) { p.push({x,y,wait:0}); setLevel({...level,waves:w}); }
+                                    }
+                                  } else if (e.button === 0) { setIsDrawing(true); applyMapChange(x, y, selectedTool); }
+                                }}
+                                onMouseEnter={() => { if (isDrawing && !isEditMode) { applyMapChange(x, y, selectedTool); } }}
+                              >
+                                {sData && <span className="absolute inset-0 flex items-center justify-center font-bold text-white drop-shadow-md text-sm pointer-events-none">{sData.id}</span>}
+                                {bData && <span className="absolute inset-0 flex items-center justify-center font-bold text-white drop-shadow-md text-sm pointer-events-none">{bData.id}</span>}
+                                {isPath && <span className="absolute inset-0 flex items-center justify-center font-black text-yellow-100 text-lg pointer-events-none">{pathNodeIndex + 1}</span>}
+                                
+                                {(cellType === TILE_TYPES.PORTAL_IN || cellType === TILE_TYPES.PORTAL_OUT) && (
+                                  <span className="absolute flex items-center justify-center top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[10px] font-bold text-white shadow-md pointer-events-none" style={{backgroundColor: customColor || '#a855f7'}}>
+                                    {level.portalIdMap?.[`${x},${y}`]}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1029,8 +1124,19 @@ export default function LevelEditor() {
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 backdrop-blur-sm">
             <div className="bg-neutral-900 border border-neutral-700 p-6 rounded-xl w-96 shadow-2xl animate-in zoom-in-95">
               <h3 className="text-lg font-bold text-white mb-4">保存关卡并同步大厅</h3>
-              <input type="text" value={saveNameInput} onChange={(e) => setSaveNameInput(e.target.value)} className="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-3 py-2 text-white mb-4 outline-none focus:border-blue-500" autoFocus />
-              <div className="flex justify-end gap-3"><button onClick={() => setShowSaveModal(false)} className="px-4 py-2 bg-neutral-800 text-white rounded hover:bg-neutral-700 transition-colors">取消</button><button onClick={handleConfirmSave} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-500 shadow-lg transition-colors">确认保存</button></div>
+              <input type="text" value={saveNameInput} onChange={(e) => setSaveNameInput(e.target.value)} className="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-3 py-2 text-white mb-3 outline-none focus:border-blue-500" autoFocus />
+              
+              {level.levelId !== 'level_01' && (
+                <label className="flex items-center gap-2 mb-4 text-sm text-neutral-400 cursor-pointer hover:text-white transition-colors">
+                  <input type="checkbox" checked={isSaveAsNew} onChange={(e) => setIsSaveAsNew(e.target.checked)} className="rounded border-neutral-700 bg-neutral-950 accent-blue-600 w-4 h-4" />
+                  另存为新关卡 (不覆盖原有关卡)
+                </label>
+              )}
+
+              <div className="flex justify-end gap-3 mt-2">
+                 <button onClick={() => {setShowSaveModal(false); setIsSaveAsNew(false);}} className="px-4 py-2 bg-neutral-800 text-white rounded hover:bg-neutral-700 transition-colors">取消</button>
+                 <button onClick={handleConfirmSave} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-500 shadow-lg transition-colors">确认保存</button>
+              </div>
             </div>
           </div>
         )}
